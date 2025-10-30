@@ -5,7 +5,7 @@ const cors = require('cors');
 const path = require('path');
 
 const app = express();
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
 
 // Middleware
 app.use(cors());
@@ -1985,7 +1985,6 @@ app.get(/^(?!\/api\/).*/, (req, res) => {
 // --- INICIAR EL SERVIDOR ---
 // Escuchar en 0.0.0.0 para que sea accesible desde otras IPs
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(` Servidor backend corriendo en http://0.0.0.0:${PORT}`);
-    console.log(`   Accede al frontend en: http://192.168.40.25:${PORT}`);
-    console.log(`   Endpoint de prueba: http://192.168.40.25:${PORT}/api/test`);
+    console.log(`🚀 Servidor backend corriendo en puerto ${PORT}`);
+    console.log(`📍 Entorno: ${process.env.NODE_ENV || 'development'}`);
 });
