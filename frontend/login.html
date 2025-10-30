@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Login - Sistema de Conteo de Inventario</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <div class="container">
+        <div id="loginContainer" class="login-container active">
+            <div class="header">
+                <h1>Sistema de Conteo de Inventario</h1>
+                <p>Iniciar sesiÃ³n para continuar</p>
+            </div>
+
+            <div class="login-form">
+                <div class="form-group">
+                    <label for="username">Usuario:</label>
+                    <input type="text" id="username" placeholder="Ingrese su usuario">
+                </div>
+
+                <div class="form-group">
+                    <label for="password">Contraseña:</label>
+                    <input type="password" id="password" placeholder="Ingrese su contraseÃ±a">
+                </div>
+
+                <button onclick="login()">Iniciar Sesión</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- CAMBIA ESTA LÃNEA PARA QUE COINCIDA CON LA IP Y PUERTO DE TU BACKEND ---
+        const API_BASE_URL = 'http://192.168.40.25:5000/api'; // Cambia a la URL correcta de tu backend
+
+        async function login() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    // Guardar usuario en localStorage
+                    localStorage.setItem('currentUser', JSON.stringify(data.user));
+
+                    // Redirigir segÃºn rol
+                    if (data.user.role === 'admin') {
+                        window.location.href = 'admin.html';
+                    } else {
+                        window.location.href = 'worker.html';
+                    }
+                } else {
+                    alert(data.message || 'Usuario o contraseña incorrectos');
+                }
+            } catch (error) {
+                console.error('Error de conexión:', error);
+                alert('Error de conexión con el servidor');
+            }
+        }
+
+        // Permitir login con Enter
+        document.addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                login();
+            }
+        });
+    </script>
+</body>
+
+</html>

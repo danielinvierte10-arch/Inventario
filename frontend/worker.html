@@ -1,0 +1,1412 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Trabajador - Sistema de Conteo de Inventario</title>
+    <link rel="stylesheet" href="styles.css?v=2">
+</head>
+
+<body>
+    <div class="container">
+        <div id="workerContainer" class="worker-container active">
+            <div class="header">
+                <h1>Panel de Trabajador</h1>
+                <p>Conteo y Reconteo de inventario</p>
+                <button class="logout-btn" onclick="logout()">Cerrar SesiÃ³n</button>
+            </div>
+
+            <div class="worker-content">
+                <!-- Resumen de tareas -->
+                <div class="tareas-resumen" id="tareasResumen" onclick="toggleTareasDetalle()">
+                    <div id="tareasResumenTexto">Cargando tareas...</div>
+                    <div id="tareasDetalle" class="tareas-detalle">
+                        <h3>Tareas Asignadas</h3>
+                        <div id="tareasLista">
+                            <p>Cargando tareas...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Mensaje de bienvenida -->
+                <div id="mensajeBienvenida" class="mensaje-bienvenida">
+                    <p>Bienvenido, <strong id="nombreUsuario">trabajador</strong>.</p>
+                    <p id="mensajeTareas">Cargando informaciÃ³n de tareas...</p>
+                </div>
+
+                <!-- Contenido de la tarea actual -->
+                <div id="currentTaskContainer" style="display: none; margin-top: 60px;">
+                    <div class="task-header">
+                        <h3 id="currentTaskTitle">Tarea Actual</h3>
+                        <div class="task-info">
+                            <div><strong>Consecutivo:</strong> <span id="taskCons">-</span></div>
+                            <div><strong>LocalizaciÃ³n:</strong> <span id="taskLocaliz">-</span></div>
+                            <div><strong>Lugar:</strong> <span id="taskLugar">-</span></div>
+                        </div>
+                    </div>
+
+                    <!-- EscÃ¡ner de cÃ³digo de barras -->
+                    <div class="barcode-scanner">
+                        <input type="text" id="barcodeInput" placeholder="Escanear cÃ³digo de barras"
+                            oninput="filterProducts()" onkeypress="handleBarcodeKeyPress(event)">
+                        <button
+                            onclick="handleBarcodeKeyPress({key: 'Enter', preventDefault: () => {}})">Escanear</button>
+                    </div>
+
+                    <!-- Lista de productos -->
+                    <div class="product-list" id="productList">
+                        <p>Cargando productos...</p>
+                    </div>
+
+                    <button id="submitBtn" class="submit-btn" onclick="submitCount()" disabled>Subir Conteo</button>
+                    <button id="submitRecountBtn" class="submit-btn" style="display:none; background:#FF9800"
+                        onclick="submitRecount()">Finalizar Reconteo</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://192.168.40.25:5000/api';
+
+        let currentUser = null;
+        let currentTask = null;
+        let counts = {};
+        let recounts = {};
+        let selectedProduct = null;
+        let assignedTasks = [];
+        let assignedRecountTasks = [];
+        let tareasDetalleVisible = false;
+        let debounceTimers = {};
+        let debounceRecountTimers = {};
+        let pendingSaves = {};
+        let pendingRecountSaves = {};
+        let isRecountMode = false;
+        let allProducts = []; // ðŸ†• Para saber si estamos en modo reconteo
+
+        // ================== INICIALIZACIÃ“N ==================
+        window.addEventListener('load', function () {
+            const storedUser = localStorage.getItem('currentUser');
+            if (storedUser) {
+                currentUser = JSON.parse(storedUser);
+                loadWorkerDashboard();
+            } else {
+                window.location.href = 'login.html';
+            }
+        });
+
+        // ProtecciÃ³n de acceso - debe ir al inicio del script
+        window.addEventListener('load', () => {
+            const userData = localStorage.getItem('currentUser');
+
+            if (!userData) {
+                // Si no hay usuario logueado, redirige al login
+                window.location.href = 'login.html';
+                return;
+            }
+
+            const user = JSON.parse(userData);
+
+            // ProtecciÃ³n por tipo de usuario
+            const currentPage = window.location.pathname.split('/').pop();
+
+            if (currentPage === 'admin.html' && user.role !== 'admin') {
+                alert('Acceso denegado. Solo administradores pueden ingresar aquÃ­.');
+                window.location.href = 'worker.html';
+                return;
+            }
+
+            if (currentPage === 'worker.html' && user.role !== 'worker') {
+                alert('Acceso denegado. Solo trabajadores pueden ingresar aquÃ­.');
+                window.location.href = 'admin.html';
+                return;
+            }
+        });
+
+
+        function logout() {
+            localStorage.removeItem('currentUser');
+            window.location.href = 'login.html';
+        }
+
+        async function loadWorkerDashboard() {
+            try {
+                const responseConteo = await fetch(`${API_BASE_URL}/tareas/${currentUser.username}`);
+                assignedTasks = await responseConteo.json();
+
+                const responseReconteo = await fetch(`${API_BASE_URL}/tareas-reconteo/${currentUser.username}`);
+                assignedRecountTasks = await responseReconteo.json();
+
+                document.getElementById('nombreUsuario').textContent = currentUser.name || currentUser.username;
+
+                const totalTareas = assignedTasks.length + assignedRecountTasks.length;
+                const mensajeTareas = document.getElementById('mensajeTareas');
+
+                if (totalTareas === 0) {
+                    mensajeTareas.innerHTML = 'No tienes tareas asignadas.';
+                } else {
+                    mensajeTareas.innerHTML = `Tienes <strong>${totalTareas}</strong> tarea${totalTareas > 1 ? 's' : ''} asignada${totalTareas > 1 ? 's' : ''}.`;
+                }
+
+                const resumenTexto = document.getElementById('tareasResumenTexto');
+                if (totalTareas === 0) {
+                    resumenTexto.innerHTML = 'No tienes tareas asignadas';
+                } else {
+                    resumenTexto.innerHTML = `Tareas: ${totalTareas}<br>Haga clic para ver detalles`;
+                }
+
+                loadTareasLista();
+            } catch (error) {
+                console.error('Error al cargar dashboard de trabajador:', error);
+                alert('Error al cargar datos. Verifique su conexiÃ³n a internet.');
+            }
+        }
+        // ================== CARGAR LISTA DE TAREAS ==================
+        function loadTareasLista() {
+            const tareasLista = document.getElementById('tareasLista');
+            tareasLista.innerHTML = '';
+
+            if (assignedTasks.length === 0 && assignedRecountTasks.length === 0) {
+                tareasLista.innerHTML = '<p>No tiene tareas asignadas</p>';
+                return;
+            }
+
+            if (assignedTasks.length > 0) {
+                const separadorConteo = document.createElement('div');
+                separadorConteo.className = 'tareas-separator';
+                separadorConteo.textContent = 'ðŸ“Š TAREAS DE CONTEO';
+                tareasLista.appendChild(separadorConteo);
+
+                assignedTasks.forEach((task, index) => {
+                    const tareaDiv = document.createElement('div');
+                    tareaDiv.className = 'tarea-seleccionable tarea-conteo';
+                    tareaDiv.innerHTML = `
+                        <div>
+                            <strong>Consecutivo:</strong> ${task.Cons} | 
+                            <strong>LocalizaciÃ³n:</strong> ${task.Localiz}
+                        </div>
+                        <button onclick="selectTask(${index}, false)" style="margin-top: 10px;">Seleccionar</button>
+                    `;
+                    tareasLista.appendChild(tareaDiv);
+                });
+            }
+
+            if (assignedRecountTasks.length > 0) {
+                const separadorReconteo = document.createElement('div');
+                separadorReconteo.className = 'tareas-separator';
+                separadorReconteo.textContent = 'ðŸ”„ TAREAS DE RECONTEO';
+                tareasLista.appendChild(separadorReconteo);
+
+                assignedRecountTasks.forEach((task, index) => {
+                    const tareaDiv = document.createElement('div');
+                    tareaDiv.className = 'tarea-seleccionable tarea-reconteo';
+                    tareaDiv.innerHTML = `
+                        <div>
+                            <strong>Consecutivo:</strong> ${task.Cons} | 
+                            <strong>LocalizaciÃ³n:</strong> ${task.Localiz}
+                        </div>
+                        <button onclick="selectTask(${index}, true)" style="margin-top: 10px; background: #FF9800;">Seleccionar</button>
+                    `;
+                    tareasLista.appendChild(tareaDiv);
+                });
+            }
+        }
+
+        function toggleTareasDetalle() {
+            const detalle = document.getElementById('tareasDetalle');
+            tareasDetalleVisible = !tareasDetalleVisible;
+
+            if (tareasDetalleVisible) {
+                detalle.classList.add('active');
+            } else {
+                detalle.classList.remove('active');
+            }
+        }
+
+        document.addEventListener('click', function (event) {
+            const tareasDetalle = document.getElementById('tareasDetalle');
+            const tareasResumen = document.querySelector('.tareas-resumen');
+
+            if (tareasDetalleVisible &&
+                !tareasDetalle.contains(event.target) &&
+                !tareasResumen.contains(event.target)) {
+                toggleTareasDetalle();
+            }
+        });
+
+        async function selectTask(index, isRecount) {
+            isRecountMode = isRecount;
+
+            if (isRecount) {
+                currentTask = assignedRecountTasks[index];
+            } else {
+                currentTask = assignedTasks[index];
+            }
+
+            try {
+                const bodegaResponse = await fetch(`${API_BASE_URL}/bodega/${currentTask.Cons}`);
+                if (!bodegaResponse.ok) {
+                    throw new Error(`HTTP ${bodegaResponse.status} al obtener descripciÃ³n de bodega`);
+                }
+                const bodegaData = await bodegaResponse.json();
+
+                const codBodResponse = await fetch(`${API_BASE_URL}/codbod-por-consecutivo/${currentTask.Cons}`);
+                if (!codBodResponse.ok) {
+                    throw new Error(`HTTP ${codBodResponse.status} al obtener CodBod`);
+                }
+                const codBodData = await codBodResponse.json();
+
+                if (!codBodData.encontrado) {
+                    throw new Error('No se pudo obtener el cÃ³digo de bodega para esta tarea.');
+                }
+
+                currentTask.CodBod = codBodData.codBod;
+                console.log('âœ… CodBod cargado:', currentTask.CodBod);
+
+                const taskType = isRecount ? 'Reconteo' : 'Conteo';
+                document.getElementById('currentTaskTitle').textContent = `Tarea de ${taskType} - Consecutivo: ${currentTask.Cons}, LocalizaciÃ³n: ${currentTask.Localiz}`;
+                document.getElementById('taskCons').textContent = currentTask.Cons || '-';
+                document.getElementById('taskLocaliz').textContent = currentTask.Localiz || '-';
+                document.getElementById('taskLugar').textContent = bodegaData.DescBodega || 'Bodega no especificada';
+
+                document.getElementById('currentTaskContainer').style.display = 'block';
+                document.getElementById('mensajeBienvenida').style.display = 'none';
+
+                if (tareasDetalleVisible) {
+                    toggleTareasDetalle();
+                }
+
+                if (isRecount) {
+                    await loadRecountProducts();
+                    document.getElementById('submitBtn').style.display = 'none';
+                    document.getElementById('submitRecountBtn').style.display = 'inline-block';
+                } else {
+                    await loadWorkerProducts();
+                    document.getElementById('submitBtn').style.display = 'inline-block';
+                    document.getElementById('submitRecountBtn').style.display = 'none';
+                }
+
+                await processPendingSaves();
+            } catch (error) {
+                console.error('âŒ Error al seleccionar tarea:', error);
+                alert('Error al cargar la tarea o el cÃ³digo de bodega. Verifique su conexiÃ³n.');
+                currentTask = null;
+            }
+        }
+
+        // ================== INICIALIZAR CONTEO ==================
+        async function inicializarConteoTarea(consecutivo, localizacion, productos) {
+            try {
+                const payload = {
+                    consecutivo,
+                    localizacion,
+                    productos: productos.map(p => ({
+                        CodProd: p.CodProd,
+                        Existencia: p.Existencia || 0
+                    }))
+                };
+
+                const resp = await fetch(`${API_BASE_URL}/inicializar-conteo`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!resp.ok) console.warn('âš ï¸ No se pudo inicializar el conteo automÃ¡tico');
+            } catch (err) {
+                console.error('âŒ Error al inicializar conteo:', err);
+            }
+        }
+
+        // ================== ðŸ†• INICIALIZAR RECONTEO ==================
+        async function inicializarReconteoTarea(consecutivo, localizacion, productos) {
+            try {
+                const payload = {
+                    consecutivo,
+                    localizacion,
+                    productos: productos.map(p => ({
+                        CodProd: p.CodProd
+                    }))
+                };
+
+                const resp = await fetch(`${API_BASE_URL}/inicializar-reconteo`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!resp.ok) console.warn('âš ï¸ No se pudo inicializar el reconteo automÃ¡tico');
+            } catch (err) {
+                console.error('âŒ Error al inicializar reconteo:', err);
+            }
+        }
+
+        async function loadWorkerProducts() {
+            if (!currentTask) return;
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/productos/${currentTask.Cons}/${currentTask.Localiz}`);
+                const products = await response.json();
+
+                allProducts = products; // ðŸ†• Guardar productos para filtrar
+
+                const productList = document.getElementById('productList');
+                productList.innerHTML = '';
+
+                if (products.length === 0) {
+                    productList.innerHTML = '<p>No hay productos para esta ubicaciÃ³n.</p>';
+                    document.getElementById('submitBtn').disabled = true;
+                    return;
+                }
+
+                await inicializarConteoTarea(currentTask.Cons, currentTask.Localiz, products);
+
+                console.log('ðŸ“„ Cargando conteos guardados desde la base de datos...');
+                let conteosGuardados = {};
+
+                try {
+                    const conteosResponse = await fetch(`${API_BASE_URL}/obtener-conteos/${currentTask.Cons}/${currentTask.Localiz}`);
+                    conteosGuardados = await conteosResponse.json();
+                    console.log('âœ… Conteos cargados desde BD:', conteosGuardados);
+                } catch (error) {
+                    console.warn('âš ï¸ No se pudieron cargar conteos desde BD:', error);
+                    const backupKey = `backup_${currentTask.Cons}_${currentTask.Localiz}`;
+                    const backup = localStorage.getItem(backupKey);
+                    if (backup) {
+                        conteosGuardados = JSON.parse(backup);
+                        console.log('ðŸ“¦ Conteos cargados desde respaldo local:', conteosGuardados);
+                    }
+                }
+
+                counts = {};
+
+                products.forEach(product => {
+                    const conteoGuardado = conteosGuardados[product.CodProd] || 0;
+                    counts[product.CodProd] = conteoGuardado;
+
+                    const esProductoAnadido = product.Existencia === 0;
+
+                    const productItem = document.createElement('div');
+                    productItem.className = 'product-item';
+                    productItem.id = `product-${product.CodProd}`;
+                    productItem.setAttribute('data-codigo', product.CodProd); // ðŸ†• Para filtrar
+                    productItem.setAttribute('data-nombre', product.NomProd.toLowerCase()); // ðŸ†• Para filtrar
+                    productItem.innerHTML = `
+                        <div>
+                            <strong>Cod: ${product.CodProd}</strong><br>
+                            ${product.NomProd}${esProductoAnadido ? '<br><small style="color: #FF9800;">âš ï¸ Producto aÃ±adido manualmente</small>' : ''}
+                        </div>
+                        <div class="count-input" id="countInput-${product.CodProd}">
+                            <button onclick="decrementCount('${product.CodProd}', 1)">-</button>
+                            <input type="number" min="0" value="${conteoGuardado}" class="contador-input" id="count-${product.CodProd}" onchange="updateCount('${product.CodProd}', this.value)">
+                            <button onclick="incrementCount('${product.CodProd}', 1)">+</button>
+                        </div>
+                    `;
+
+                    productItem.addEventListener('click', () => {
+                        selectProduct(product.CodProd);
+                    });
+
+                    productList.appendChild(productItem);
+                });
+
+                checkSubmitButton();
+                saveLocalBackup();
+            } catch (error) {
+                console.error('Error al cargar productos:', error);
+                alert('Error al cargar productos. Verifique su conexiÃ³n.');
+            }
+        }
+
+        // ================== ðŸ†• CARGAR PRODUCTOS (RECONTEO) ==================
+        async function loadRecountProducts() {
+            if (!currentTask) return;
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/productos-reconteo/${currentTask.Cons}/${currentTask.Localiz}`);
+                const products = await response.json();
+
+                allProducts = products; // ðŸ†• Guardar productos para filtrar
+
+                const productList = document.getElementById('productList');
+                productList.innerHTML = '';
+
+                if (products.length === 0) {
+                    productList.innerHTML = '<p style="color: #4CAF50; text-align: center; padding: 20px;">âœ… No hay productos con inconsistencias. Todo estÃ¡ en orden.</p>';
+                    document.getElementById('submitRecountBtn').disabled = true;
+                    return;
+                }
+
+                await inicializarReconteoTarea(currentTask.Cons, currentTask.Localiz, products);
+
+                console.log('ðŸ“„ Cargando reconteos guardados desde la base de datos...');
+                let reconteosGuardados = {};
+
+                try {
+                    const reconteosResponse = await fetch(`${API_BASE_URL}/obtener-reconteos/${currentTask.Cons}/${currentTask.Localiz}`);
+                    reconteosGuardados = await reconteosResponse.json();
+                    console.log('âœ… Reconteos cargados desde BD:', reconteosGuardados);
+                } catch (error) {
+                    console.warn('âš ï¸ No se pudieron cargar reconteos desde BD:', error);
+                    const backupKey = `backup_recount_${currentTask.Cons}_${currentTask.Localiz}`;
+                    const backup = localStorage.getItem(backupKey);
+                    if (backup) {
+                        reconteosGuardados = JSON.parse(backup);
+                        console.log('ðŸ“¦ Reconteos cargados desde respaldo local:', reconteosGuardados);
+                    }
+                }
+
+                recounts = {};
+
+                products.forEach(product => {
+                    const reconteoGuardado = reconteosGuardados[product.CodProd] || 0;
+                    recounts[product.CodProd] = reconteoGuardado;
+
+                    const productItem = document.createElement('div');
+                    productItem.className = 'product-item';
+                    productItem.id = `product-recount-${product.CodProd}`;
+                    productItem.setAttribute('data-codigo', product.CodProd); // ðŸ†• Para filtrar
+                    productItem.setAttribute('data-nombre', product.NomProd.toLowerCase()); // ðŸ†• Para filtrar
+                    productItem.innerHTML = `
+                        <div style="flex: 1;">
+                            <strong>Cod: ${product.CodProd}</strong><br>
+                            ${product.NomProd}<br>
+                            <small style="color: #888;">Existencia: ${product.Existencia} | Conteo: ${product.Conteo}</small>
+                        </div>
+                        <div class="count-input" id="recountInput-${product.CodProd}">
+                            <button onclick="decrementRecount('${product.CodProd}', 1)">-</button>
+                            <input type="number" min="0" value="${reconteoGuardado}" class="contador-input" id="recount-${product.CodProd}" onchange="updateRecount('${product.CodProd}', this.value)">
+                            <button onclick="incrementRecount('${product.CodProd}', 1)">+</button>
+                        </div>
+                    `;
+
+                    productItem.addEventListener('click', () => {
+                        selectRecountProduct(product.CodProd);
+                    });
+
+                    productList.appendChild(productItem);
+                });
+
+                checkRecountSubmitButton();
+                saveLocalRecountBackup();
+            } catch (error) {
+                console.error('Error al cargar productos de reconteo:', error);
+                alert('Error al cargar productos de reconteo. Verifique su conexiÃ³n.');
+            }
+        }
+
+        function filterProducts() {
+            const searchTerm = document.getElementById('barcodeInput').value.trim().toLowerCase();
+            const productItems = document.querySelectorAll('.product-item');
+
+            console.log('ðŸ” Buscando:', searchTerm);
+
+            let visibleCount = 0;
+
+            if (searchTerm === '') {
+                productItems.forEach(item => {
+                    item.style.display = 'flex';
+                });
+
+                const noResultsMsg = document.getElementById('noResultsMessage');
+                if (noResultsMsg) noResultsMsg.remove();
+                return;
+            }
+
+            productItems.forEach(item => {
+                const codigo = (item.getAttribute('data-codigo') || '').toLowerCase();
+                const nombre = (item.getAttribute('data-nombre') || '').toLowerCase();
+
+                if (codigo.includes(searchTerm) || nombre.includes(searchTerm)) {
+                    item.style.display = 'flex';
+                    visibleCount++;
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+
+            const productList = document.getElementById('productList');
+            let noResultsMsg = document.getElementById('noResultsMessage');
+
+            if (visibleCount === 0) {
+                if (!noResultsMsg) {
+                    noResultsMsg = document.createElement('p');
+                    noResultsMsg.id = 'noResultsMessage';
+                    noResultsMsg.style.textAlign = 'center';
+                    noResultsMsg.style.color = '#888';
+                    noResultsMsg.style.padding = '20px';
+                    productList.appendChild(noResultsMsg);
+                }
+                noResultsMsg.textContent = `No se han encontrado productos con "${searchTerm}"`;
+            } else {
+                if (noResultsMsg) {
+                    noResultsMsg.remove();
+                }
+            }
+        }
+
+        // ðŸ§ª FUNCIÃ“N DE PRUEBA - Eliminar despuÃ©s
+        function testFilter() {
+            console.log('=== PRUEBA DE FILTRO ===');
+            const input = document.getElementById('barcodeInput');
+            console.log('Input existe:', !!input);
+            console.log('Valor actual:', input.value);
+
+            const items = document.querySelectorAll('.product-item');
+            console.log('Total productos:', items.length);
+
+            items.forEach((item, i) => {
+                if (i < 3) { // Solo los primeros 3 para no saturar
+                    console.log(`Producto ${i}:`, {
+                        codigo: item.getAttribute('data-codigo'),
+                        nombre: item.getAttribute('data-nombre'),
+                        visible: item.style.display
+                    });
+                }
+            });
+        }
+
+        // ================== SELECCIONAR PRODUCTO (CONTEO) ==================
+        function selectProduct(cod) {
+            document.querySelectorAll('.product-item').forEach(item => {
+                item.classList.remove('active');
+                item.classList.add('inactive');
+            });
+
+            const selectedElement = document.getElementById(`product-${cod}`);
+            if (selectedElement) {
+                selectedElement.classList.remove('inactive');
+                selectedElement.classList.add('active');
+            }
+
+            document.querySelectorAll('.count-input').forEach(input => {
+                input.classList.remove('visible');
+            });
+
+            const countInput = document.getElementById(`countInput-${cod}`);
+            if (countInput) {
+                countInput.classList.add('visible');
+            }
+
+            selectedProduct = cod;
+        }
+
+        // ================== ðŸ†• SELECCIONAR PRODUCTO (RECONTEO) ==================
+        function selectRecountProduct(cod) {
+            document.querySelectorAll('.product-item').forEach(item => {
+                item.classList.remove('active');
+                item.classList.add('inactive');
+            });
+
+            const selectedElement = document.getElementById(`product-recount-${cod}`);
+            if (selectedElement) {
+                selectedElement.classList.remove('inactive');
+                selectedElement.classList.add('active');
+            }
+
+            document.querySelectorAll('.count-input').forEach(input => {
+                input.classList.remove('visible');
+            });
+
+            const recountInput = document.getElementById(`recountInput-${cod}`);
+            if (recountInput) {
+                recountInput.classList.add('visible');
+            }
+
+            selectedProduct = cod;
+        }
+
+        // ================== ACTUALIZAR CONTEO ==================
+        async function updateCount(cod, value) {
+            const newValue = parseInt(value) || 0;
+            counts[cod] = newValue;
+
+            saveLocalBackup();
+
+            if (debounceTimers[cod]) {
+                clearTimeout(debounceTimers[cod]);
+            }
+
+            debounceTimers[cod] = setTimeout(async () => {
+                console.log(`ðŸ’¾ Intentando guardar: ${cod} = ${newValue}`);
+
+                const success = await saveCountToDB(cod, newValue);
+
+                if (success) {
+                    console.log(`âœ… ${cod} guardado exitosamente en BD`);
+
+                    const productItem = document.getElementById(`product-${cod}`);
+                    if (productItem) {
+                        productItem.style.borderLeft = '3px solid #4CAF50';
+                        setTimeout(() => {
+                            productItem.style.borderLeft = '';
+                        }, 1000);
+                    }
+
+                    delete pendingSaves[cod];
+                    savePendingToLocalStorage();
+                } else {
+                    console.warn(`âš ï¸ ${cod} no se pudo guardar, agregado a pendientes`);
+
+                    pendingSaves[cod] = newValue;
+                    savePendingToLocalStorage();
+
+                    const productItem = document.getElementById(`product-${cod}`);
+                    if (productItem) {
+                        productItem.style.borderLeft = '3px solid #FF9800';
+                        setTimeout(() => {
+                            productItem.style.borderLeft = '';
+                        }, 1000);
+                    }
+                }
+            }, 600);
+
+            checkSubmitButton();
+        }
+
+        async function updateRecount(cod, value) {
+            const newValue = parseInt(value) || 0;
+            recounts[cod] = newValue;
+
+            saveLocalRecountBackup();
+
+            if (debounceRecountTimers[cod]) {
+                clearTimeout(debounceRecountTimers[cod]);
+            }
+
+            debounceRecountTimers[cod] = setTimeout(async () => {
+                console.log(`ðŸ’¾ Intentando guardar reconteo: ${cod} = ${newValue}`);
+
+                const success = await saveRecountToDB(cod, newValue);
+
+                if (success) {
+                    console.log(`âœ… Reconteo ${cod} guardado exitosamente en BD`);
+
+                    const productItem = document.getElementById(`product-recount-${cod}`);
+                    if (productItem) {
+                        productItem.style.borderLeft = '3px solid #4CAF50';
+                        setTimeout(() => {
+                            productItem.style.borderLeft = '';
+                        }, 1000);
+                    }
+
+                    delete pendingRecountSaves[cod];
+                    savePendingRecountToLocalStorage();
+                } else {
+                    console.warn(`âš ï¸ Reconteo ${cod} no se pudo guardar, agregado a pendientes`);
+
+                    pendingRecountSaves[cod] = newValue;
+                    savePendingRecountToLocalStorage();
+
+                    const productItem = document.getElementById(`product-recount-${cod}`);
+                    if (productItem) {
+                        productItem.style.borderLeft = '3px solid #FF9800';
+                        setTimeout(() => {
+                            productItem.style.borderLeft = '';
+                        }, 1000);
+                    }
+                }
+            }, 600);
+
+            checkRecountSubmitButton();
+        }
+
+        // ================== GUARDAR CONTEO EN BD ==================
+        async function saveCountToDB(cod, conteo) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/actualizar-conteo`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        cons: currentTask.Cons,
+                        localiz: currentTask.Localiz,
+                        codProd: cod,
+                        conteo: conteo
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                return data.success;
+            } catch (error) {
+                console.error(`Error al guardar reconteo ${cod} en BD:`, error);
+                return false;
+            }
+        }
+
+        // ================== ðŸ†• GUARDAR RECONTEO EN BD ==================
+        async function saveRecountToDB(cod, reconteo) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/actualizar-reconteo`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        cons: currentTask.Cons,
+                        localiz: currentTask.Localiz,
+                        codProd: cod,
+                        reconteo: reconteo
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                return data.success;
+            } catch (error) {
+                console.error(`Error al guardar reconteo ${cod} en BD:`, error);
+                return false;
+            }
+        }
+
+        // ================== GUARDAR RESPALDO LOCAL (CONTEO) ==================
+        function saveLocalBackup() {
+            if (currentTask && !isRecountMode) {
+                const backupKey = `backup_${currentTask.Cons}_${currentTask.Localiz}`;
+                localStorage.setItem(backupKey, JSON.stringify(counts));
+            }
+        }
+
+        // ================== ðŸ†• GUARDAR RESPALDO LOCAL (RECONTEO) ==================
+        function saveLocalRecountBackup() {
+            if (currentTask && isRecountMode) {
+                const backupKey = `backup_recount_${currentTask.Cons}_${currentTask.Localiz}`;
+                localStorage.setItem(backupKey, JSON.stringify(recounts));
+            }
+        }
+
+        // ================== GUARDAR PENDIENTES LOCAL (CONTEO) ==================
+        function savePendingToLocalStorage() {
+            if (currentTask && !isRecountMode) {
+                const pendingKey = `pending_${currentTask.Cons}_${currentTask.Localiz}`;
+                localStorage.setItem(pendingKey, JSON.stringify(pendingSaves));
+            }
+        }
+
+        // ================== ðŸ†• GUARDAR PENDIENTES LOCAL (RECONTEO) ==================
+        function savePendingRecountToLocalStorage() {
+            if (currentTask && isRecountMode) {
+                const pendingKey = `pending_recount_${currentTask.Cons}_${currentTask.Localiz}`;
+                localStorage.setItem(pendingKey, JSON.stringify(pendingRecountSaves));
+            }
+        }
+
+        // ================== ðŸ†• PROCESAR PENDIENTES (RECONTEO) - DEFINIR PRIMERO ==================
+        async function processPendingRecountSaves() {
+            if (!currentTask) return;
+
+            const pendingKey = `pending_recount_${currentTask.Cons}_${currentTask.Localiz}`;
+            const pendingData = localStorage.getItem(pendingKey);
+
+            if (!pendingData) return;
+
+            try {
+                pendingRecountSaves = JSON.parse(pendingData);
+            } catch (e) {
+                console.error('Error al parsear pendientes de reconteo:', e);
+                pendingRecountSaves = {};
+                return;
+            }
+
+            if (Object.keys(pendingRecountSaves).length === 0) return;
+
+            console.log('ðŸ”„ Procesando reconteos pendientes:', pendingRecountSaves);
+
+            for (const [cod, reconteo] of Object.entries(pendingRecountSaves)) {
+                const success = await saveRecountToDB(cod, reconteo);
+
+                if (success) {
+                    console.log(`âœ… Reconteo pendiente guardado: ${cod} = ${reconteo}`);
+                    delete pendingRecountSaves[cod];
+                }
+            }
+
+            savePendingRecountToLocalStorage();
+
+            if (Object.keys(pendingRecountSaves).length === 0) {
+                console.log('âœ… Todos los reconteos pendientes se guardaron exitosamente');
+                localStorage.removeItem(pendingKey);
+            }
+        }
+
+
+        async function processPendingSaves() {
+            if (!currentTask) return;
+
+            if (isRecountMode) {
+                await processPendingRecountSaves();
+                return;
+            }
+
+            const pendingKey = `pending_${currentTask.Cons}_${currentTask.Localiz}`;
+            const pendingData = localStorage.getItem(pendingKey);
+
+            if (!pendingData) return;
+
+            try {
+                pendingSaves = JSON.parse(pendingData);
+            } catch (e) {
+                console.error('Error al parsear pendientes:', e);
+                pendingSaves = {};
+                return;
+            }
+
+            if (Object.keys(pendingSaves).length === 0) return;
+
+            console.log('ðŸ”„ Procesando conteos pendientes:', pendingSaves);
+
+            for (const [cod, conteo] of Object.entries(pendingSaves)) {
+                const success = await saveCountToDB(cod, conteo);
+
+                if (success) {
+                    console.log(`âœ… Conteo pendiente guardado: ${cod} = ${conteo}`);
+                    delete pendingSaves[cod];
+                }
+            }
+
+            savePendingToLocalStorage();
+
+            if (Object.keys(pendingSaves).length === 0) {
+                console.log('âœ… Todos los conteos pendientes se guardaron exitosamente');
+                localStorage.removeItem(pendingKey);
+            }
+        }
+
+        // ================== INCREMENTAR/DECREMENTAR (CONTEO) ==================
+        function incrementCount(cod, amount) {
+            const input = document.getElementById(`count-${cod}`);
+            if (input) {
+                const newValue = (parseInt(input.value) || 0) + amount;
+                if (newValue >= 0) {
+                    input.value = newValue;
+                    updateCount(cod, newValue);
+                }
+            }
+        }
+
+        function decrementCount(cod, amount) {
+            const input = document.getElementById(`count-${cod}`);
+            if (input) {
+                const newValue = Math.max(0, (parseInt(input.value) || 0) - amount);
+                input.value = newValue;
+                updateCount(cod, newValue);
+            }
+        }
+
+        // ================== ðŸ†• INCREMENTAR/DECREMENTAR (RECONTEO) ==================
+        function incrementRecount(cod, amount) {
+            const input = document.getElementById(`recount-${cod}`);
+            if (input) {
+                const newValue = (parseInt(input.value) || 0) + amount;
+                if (newValue >= 0) {
+                    input.value = newValue;
+                    updateRecount(cod, newValue);
+                }
+            }
+        }
+
+        function decrementRecount(cod, amount) {
+            const input = document.getElementById(`recount-${cod}`);
+            if (input) {
+                const newValue = Math.max(0, (parseInt(input.value) || 0) - amount);
+                input.value = newValue;
+                updateRecount(cod, newValue);
+            }
+        }
+
+        async function scanProduct() {
+            const barcodeInput = document.getElementById('barcodeInput');
+            const codigo = barcodeInput.value.trim();
+
+            if (!codigo) {
+                alert('âš ï¸ Por favor ingrese un cÃ³digo de producto');
+                return;
+            }
+
+            if (!currentTask || !currentTask.CodBod) {
+                alert('âŒ Error: No se pudo obtener el cÃ³digo de bodega de la tarea actual');
+                return;
+            }
+
+            const bodega = currentTask.CodBod.trim();
+            const localizacion = currentTask.Localiz.trim();
+
+            console.log('ðŸ” Escaneando producto:', { bodega, localizacion, codigo });
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/verificar-ubicacion-producto/${bodega}/${localizacion}/${codigo}`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+                const data = await response.json();
+                console.log('ðŸ“Š Respuesta del servidor:', data);
+
+                if (!data.encontrado) {
+                    // âŒ ESCENARIO #2: Producto no existe
+                    alert(data.mensaje);
+                    barcodeInput.value = '';
+                    resetProductFilter();
+                    barcodeInput.focus();
+                    return;
+                }
+
+                if (!data.ubicacionCorrecta) {
+                    // âš ï¸ ESCENARIO #1: Producto estÃ¡ en otra ubicaciÃ³n
+                    alert(data.mensaje);
+                    barcodeInput.value = '';
+                    resetProductFilter();
+                    barcodeInput.focus();
+                    return;
+                }
+
+                const codigoPadded = data.codigo;
+
+                // â™»ï¸ Si el producto ya fue aÃ±adido antes, solo sumar
+                const yaExiste = document.getElementById(`product-${codigoPadded}`);
+                if (yaExiste) {
+                    console.log('â™»ï¸ Producto ya existente en la lista, incrementando...');
+                    incrementCount(codigoPadded, 1);
+                    yaExiste.style.backgroundColor = '#4CAF50';
+                    yaExiste.style.transition = 'background-color 0.3s';
+                    setTimeout(() => (yaExiste.style.backgroundColor = ''), 600);
+                    yaExiste.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+                    barcodeInput.value = '';
+                    resetProductFilter();
+                    barcodeInput.focus();
+                    return;
+                }
+
+                // ðŸ“¦ ESCENARIO #3: Producto con existencia 0 y NO estÃ¡ en la lista
+                if (data.existenciaCero) {
+                    const confirmar = confirm(data.mensaje + '\n\nÂ¿Desea agregarlo al conteo?');
+
+                    if (!confirmar) {
+                        barcodeInput.value = '';
+                        resetProductFilter();
+                        barcodeInput.focus();
+                        return;
+                    }
+
+                    const addResponse = await fetch(`${API_BASE_URL}/anadir-producto-existencia-cero`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            cons: currentTask.Cons,
+                            localiz: currentTask.Localiz,
+                            codProd: data.codigo,
+                            esReconteo: false  // âœ… AGREGAR ESTA LÃNEA
+                        })
+                    });
+
+                    const addResult = await addResponse.json();
+
+                    if (!addResult.success) {
+                        alert('âš ï¸ ' + addResult.message);
+                        barcodeInput.value = '';
+                        resetProductFilter();
+                        barcodeInput.focus();
+                        return;
+                    }
+
+                    const producto = addResult.producto;
+                    alert('âœ… Producto aÃ±adido al conteo exitosamente');
+
+                    allProducts.push(producto);
+                    counts[producto.CodProd] = producto.Conteo;  // âœ… USA EL VALOR DEL SERVIDOR
+
+                    const productList = document.getElementById('productList');
+                    const productItem = document.createElement('div');
+                    productItem.className = 'product-item';
+                    productItem.id = `product-${producto.CodProd}`;
+                    productItem.setAttribute('data-codigo', producto.CodProd);
+                    productItem.setAttribute('data-nombre', producto.NomProd.toLowerCase());
+                    productItem.innerHTML = `
+                        <div style="flex:1">
+                            <strong>Cod: ${producto.CodProd}</strong><br>
+                            ${producto.NomProd}<br>
+                            <small style="color:#FF9800;">âš ï¸ Producto aÃ±adido manualmente</small>
+                        </div>
+                        <div class="count-input" id="countInput-${producto.CodProd}">
+                            <button onclick="decrementCount('${producto.CodProd}',1)">-</button>
+                            <input type="number" min="0" value="${producto.Conteo}" class="contador-input" id="count-${producto.CodProd}" onchange="updateCount('${producto.CodProd}',this.value)">
+                            <button onclick="incrementCount('${producto.CodProd}',1)">+</button>
+                        </div>
+                    `;
+
+                    productItem.addEventListener('click', () => selectProduct(producto.CodProd));
+                    productList.insertBefore(productItem, productList.firstChild);
+                    productItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+                    // âœ… NO LLAMAR updateCount aquÃ­, ya estÃ¡ guardado en la BD
+                    saveLocalBackup();
+                    checkSubmitButton();
+
+                    productItem.addEventListener('click', () => selectProduct(producto.CodProd));
+                    productList.insertBefore(productItem, productList.firstChild);
+                    productItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+                    await updateCount(producto.CodProd, 1);
+                    saveLocalBackup();
+                    checkSubmitButton();
+
+                    productItem.style.backgroundColor = '#4CAF50';
+                    setTimeout(() => (productItem.style.backgroundColor = ''), 600);
+
+                    barcodeInput.value = '';
+                    resetProductFilter();
+                    barcodeInput.focus();
+                    return;
+                }
+
+                // âœ… ESCENARIO #4: UbicaciÃ³n correcta y existencia > 0
+                const productElement = document.getElementById(`product-${codigoPadded}`);
+
+                if (productElement) {
+                    incrementCount(codigoPadded, 1);
+                    productElement.style.backgroundColor = '#4CAF50';
+                    setTimeout(() => (productElement.style.backgroundColor = ''), 600);
+                    productElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                } else {
+                    alert(`âœ… Producto correcto pero no estÃ¡ en la lista de esta localizaciÃ³n.\nCÃ³digo: ${codigo}`);
+                }
+
+                barcodeInput.value = '';
+                resetProductFilter();
+                barcodeInput.focus();
+
+            } catch (error) {
+                console.error('âŒ Error al escanear producto:', error);
+                alert('âŒ Error de conexiÃ³n al verificar el producto. Intente nuevamente.');
+                barcodeInput.value = '';
+                resetProductFilter();
+                barcodeInput.focus();
+            }
+        }
+
+
+
+
+        // ================== VERIFICAR BOTÃ“N SUBMIT (CONTEO) ==================
+        function checkSubmitButton() {
+            const submitBtn = document.getElementById('submitBtn');
+            if (submitBtn) {
+                submitBtn.disabled = false;
+            }
+        }
+
+        function handleBarcodeKeyPress(event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                if (isRecountMode) {
+                    scanRecountProduct();
+                } else {
+                    scanProduct();
+                }
+            }
+        }
+
+        // ================== ðŸ†• VERIFICAR BOTÃ“N SUBMIT (RECONTEO) ==================
+        function checkRecountSubmitButton() {
+            const submitRecountBtn = document.getElementById('submitRecountBtn');
+            if (submitRecountBtn) {
+                submitRecountBtn.disabled = false;
+            }
+        }
+
+        async function submitCount() {
+            if (!currentTask) return;
+
+            if (Object.keys(pendingSaves).length > 0) {
+                alert('âš ï¸ Hay conteos pendientes de guardar. Espere un momento e intente de nuevo.');
+                await processPendingSaves();
+                if (Object.keys(pendingSaves).length > 0) {
+                    alert('âŒ No se puede finalizar la tarea porque hay conteos sin guardar. Verifique su conexiÃ³n.');
+                    return;
+                }
+            }
+
+            const confirmacion = confirm('Â¿EstÃ¡ seguro de que desea finalizar esta tarea? Esto marcarÃ¡ el conteo como completado.');
+            if (!confirmacion) return;
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/finalizar-tarea`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        cons: currentTask.Cons,
+                        localiz: currentTask.Localiz
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    alert('âœ… Tarea finalizada exitosamente');
+
+                    const backupKey = `backup_${currentTask.Cons}_${currentTask.Localiz}`;
+                    const pendingKey = `pending_${currentTask.Cons}_${currentTask.Localiz}`;
+                    localStorage.removeItem(backupKey);
+                    localStorage.removeItem(pendingKey);
+
+                    assignedTasks = assignedTasks.filter(task =>
+                        !(task.Cons === currentTask.Cons && task.Localiz === currentTask.Localiz)
+                    );
+
+                    document.getElementById('currentTaskContainer').style.display = 'none';
+                    document.getElementById('mensajeBienvenida').style.display = 'block';
+
+                    loadWorkerDashboard();
+                } else {
+                    alert('Error al finalizar tarea: ' + data.message);
+                }
+            } catch (error) {
+                console.error('Error al finalizar tarea:', error);
+                alert('Error de conexiÃ³n con el servidor');
+            }
+        }
+
+        async function scanRecountProduct() {
+            const barcodeInput = document.getElementById('barcodeInput');
+            const codigo = barcodeInput.value.trim();
+
+            if (!codigo) {
+                alert('âš ï¸ Por favor ingrese un cÃ³digo de producto');
+                return;
+            }
+
+            if (!currentTask || !currentTask.CodBod) {
+                alert('âŒ Error: No se pudo obtener el cÃ³digo de bodega de la tarea actual');
+                return;
+            }
+
+            const bodega = currentTask.CodBod.trim();
+            const localizacion = currentTask.Localiz.trim();
+
+            console.log('ðŸ” [RECONTEO] Escaneando producto:', { bodega, localizacion, codigo });
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/verificar-ubicacion-producto/${bodega}/${localizacion}/${codigo}`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+                const data = await response.json();
+                console.log('ðŸ“Š [RECONTEO] Respuesta del servidor:', data);
+
+                if (!data.encontrado) {
+                    // âŒ ESCENARIO #2: Producto no existe
+                    alert(data.mensaje);
+                    barcodeInput.value = '';
+                    resetProductFilter();
+                    barcodeInput.focus();
+                    return;
+                }
+
+                if (!data.ubicacionCorrecta) {
+                    // âš ï¸ ESCENARIO #1: Producto estÃ¡ en otra ubicaciÃ³n
+                    alert(data.mensaje);
+                    barcodeInput.value = '';
+                    resetProductFilter();
+                    barcodeInput.focus();
+                    return;
+                }
+
+                const codigoPadded = data.codigo;
+                const yaExiste = document.getElementById(`product-recount-${codigoPadded}`);
+
+                // â™»ï¸ Si el producto ya estÃ¡ en la lista â†’ incrementa
+                if (yaExiste) {
+                    console.log('â™»ï¸ Producto ya existente en lista de reconteo, incrementando...');
+                    incrementRecount(codigoPadded, 1);
+                    yaExiste.style.backgroundColor = '#FF9800';
+                    setTimeout(() => (yaExiste.style.backgroundColor = ''), 600);
+                    yaExiste.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    barcodeInput.value = '';
+                    resetProductFilter();
+                    barcodeInput.focus();
+                    return;
+                }
+
+                // ðŸ“¦ ESCENARIO #3: Si tiene existencia cero â†’ permitir aÃ±adir
+                if (data.existenciaCero) {
+                    const confirmar = confirm(data.mensaje + '\n\nÂ¿Desea agregarlo al reconteo?');
+                    if (!confirmar) {
+                        barcodeInput.value = '';
+                        resetProductFilter();
+                        barcodeInput.focus();
+                        return;
+                    }
+
+                    const addResponse = await fetch(`${API_BASE_URL}/anadir-producto-existencia-cero`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            cons: currentTask.Cons,
+                            localiz: currentTask.Localiz,
+                            codProd: data.codigo,
+                            esReconteo: true  // âœ… AGREGAR ESTA LÃNEA
+                        })
+                    });
+
+                    const addResult = await addResponse.json();
+                    if (!addResult.success) {
+                        alert('âš ï¸ ' + addResult.message);
+                        barcodeInput.value = '';
+                        resetProductFilter();
+                        barcodeInput.focus();
+                        return;
+                    }
+
+                    const producto = addResult.producto;
+                    recounts[producto.CodProd] = producto.Reconteo;  // âœ… USA EL VALOR DEL SERVIDOR
+                    allProducts.push(producto);
+
+                    const productList = document.getElementById('productList');
+                    const productItem = document.createElement('div');
+                    productItem.className = 'product-item';
+                    productItem.id = `product-recount-${producto.CodProd}`;
+                    productItem.setAttribute('data-codigo', producto.CodProd);
+                    productItem.setAttribute('data-nombre', producto.NomProd.toLowerCase());
+                    productItem.innerHTML = `
+                        <div style="flex:1;">
+                            <strong>Cod: ${producto.CodProd}</strong><br>
+                            ${producto.NomProd}<br>
+                            
+                            <small style="color:#FF9800;">âš ï¸ Producto aÃ±adido manualmente</small>
+                        </div>
+                        <div class="count-input" id="recountInput-${producto.CodProd}">
+                            <button onclick="decrementRecount('${producto.CodProd}', 1)">-</button>
+                            <input type="number" min="0" value="${producto.Reconteo}" class="contador-input" id="recount-${producto.CodProd}" onchange="updateRecount('${producto.CodProd}', this.value)">
+                            <button onclick="incrementRecount('${producto.CodProd}', 1)">+</button>
+                        </div>
+                    `;
+                    productItem.addEventListener('click', () => selectRecountProduct(producto.CodProd));
+                    productList.insertBefore(productItem, productList.firstChild);
+                    productItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+                    // âœ… NO LLAMAR updateRecount aquÃ­, ya estÃ¡ guardado en la BD
+                    saveLocalRecountBackup();
+                    checkRecountSubmitButton();
+                    productItem.addEventListener('click', () => selectRecountProduct(producto.CodProd));
+                    productList.insertBefore(productItem, productList.firstChild);
+                    productItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+                    saveLocalRecountBackup();
+                    checkRecountSubmitButton();
+
+                    productItem.style.backgroundColor = '#FF9800';
+                    setTimeout(() => (productItem.style.backgroundColor = ''), 600);
+
+                    barcodeInput.value = '';
+                    resetProductFilter();
+                    barcodeInput.focus();
+                    return;
+                }
+
+                // âœ… ESCENARIO #4: Producto con existencia vÃ¡lida â†’ sumar reconteo
+                const element = document.getElementById(`product-recount-${codigoPadded}`);
+                if (element) {
+                    incrementRecount(codigoPadded, 1);
+                    element.style.backgroundColor = '#FF9800';
+                    setTimeout(() => (element.style.backgroundColor = ''), 600);
+                    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                } else {
+                    alert(`âœ… Producto correcto pero no estÃ¡ en la lista de reconteo.\nCÃ³digo: ${codigo}`);
+                }
+
+                barcodeInput.value = '';
+                resetProductFilter();
+                barcodeInput.focus();
+
+            } catch (err) {
+                console.error('âŒ Error al escanear producto en reconteo:', err);
+                alert('âŒ Error de conexiÃ³n al verificar el producto. Intente nuevamente.');
+                barcodeInput.value = '';
+                resetProductFilter();
+                barcodeInput.focus();
+            }
+        }
+
+        function resetProductFilter() {
+            document.querySelectorAll('.product-item').forEach(item => {
+                item.style.display = 'flex';
+            });
+            const noResultsMsg = document.getElementById('noResultsMessage');
+            if (noResultsMsg) noResultsMsg.remove();
+        }
+
+        async function submitRecount() {
+            if (!currentTask) return;
+
+            if (Object.keys(pendingRecountSaves).length > 0) {
+                alert('âš ï¸ Hay reconteos pendientes de guardar. Espere un momento e intente de nuevo.');
+                await processPendingRecountSaves();
+                if (Object.keys(pendingRecountSaves).length > 0) {
+                    alert('âŒ No se puede finalizar la tarea porque hay reconteos sin guardar. Verifique su conexiÃ³n.');
+                    return;
+                }
+            }
+
+            const confirmacion = confirm('Â¿EstÃ¡ seguro de que desea finalizar este reconteo? Esto marcarÃ¡ el reconteo como completado.');
+            if (!confirmacion) return;
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/finalizar-reconteo`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        cons: currentTask.Cons,
+                        localiz: currentTask.Localiz
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    alert('âœ… Reconteo finalizado exitosamente');
+
+                    const backupKey = `backup_recount_${currentTask.Cons}_${currentTask.Localiz}`;
+                    const pendingKey = `pending_recount_${currentTask.Cons}_${currentTask.Localiz}`;
+                    localStorage.removeItem(backupKey);
+                    localStorage.removeItem(pendingKey);
+
+                    assignedRecountTasks = assignedRecountTasks.filter(task =>
+                        !(task.Cons === currentTask.Cons && task.Localiz === currentTask.Localiz)
+                    );
+
+                    document.getElementById('currentTaskContainer').style.display = 'none';
+                    document.getElementById('mensajeBienvenida').style.display = 'block';
+
+                    loadWorkerDashboard();
+                } else {
+                    alert('Error al finalizar reconteo: ' + data.message);
+                }
+            } catch (error) {
+                console.error('Error al finalizar reconteo:', error);
+                alert('Error de conexiÃ³n con el servidor');
+            }
+        }
+
+        // ================== VERIFICAR CONEXIÃ“N PERIÃ“DICAMENTE ==================
+        setInterval(async () => {
+            if (currentTask) {
+                if (isRecountMode && Object.keys(pendingRecountSaves).length > 0) {
+                    console.log('ðŸ“„ Verificando conexiÃ³n y procesando reconteos pendientes...');
+                    await processPendingRecountSaves();
+                } else if (!isRecountMode && Object.keys(pendingSaves).length > 0) {
+                    console.log('ðŸ“„ Verificando conexiÃ³n y procesando conteos pendientes...');
+                    await processPendingSaves();
+                }
+            }
+        }, 30000); // Cada 30 segundos
+    </script>
+</body>
+
+</html>

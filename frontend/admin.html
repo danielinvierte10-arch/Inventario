@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Administrador - Sistema de Conteo de Inventario</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <div class="container">
+        <div id="adminContainer" class="admin-container active">
+            <div class="header">
+                <h1>Panel de Administrador</h1>
+                <p>GestiÃ³n de tareas de conteo de inventario</p>
+                <button class="logout-btn" onclick="logout()">Cerrar SesiÃ³n</button>
+            </div>
+
+            <div class="admin-content">
+                <div class="admin-sections">
+                    <!-- ======================= ASIGNACIÃ“N DE TAREAS ======================= -->
+                    <div class="assignment-form">
+                        <h3>Asignar Tareas</h3>
+
+                        <div class="form-group">
+                            <label for="adminConsecutivo">Consecutivo:</label>
+                            <select id="adminConsecutivo" onchange="loadTareasAsignadas()">
+                                <option value="">Seleccione consecutivo</option>
+                            </select>
+                        </div>
+
+                        <div id="tareasTableContainer">
+                            <table class="tareas-table" id="tareasTable">
+                                <thead>
+                                    <tr>
+                                        <th>Bodega</th>
+                                        <th>LocalizaciÃ³n</th>
+                                        <th>Asignar a</th>
+                                        <th>Asignar reconteo</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tareasTableBody">
+                                    <tr>
+                                        <td colspan="4">Seleccione un consecutivo para ver las localizaciones</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+
+                            <!-- ======================= TABLA DE INCONSISTENCIAS ======================= -->
+                            <h3>Inconsistencias</h3>
+                            <table class="tareas-table" id="inconsistenciasTable">
+                                <thead>
+                                    <tr>
+                                        <th>Bodega</th>
+                                        <th>LocalizaciÃ³n</th>
+                                        <th>Producto</th>
+                                        <th>Existencia</th>
+                                        <th>Conteo</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="inconsistenciasTableBody">
+                                    <tr>
+                                        <td colspan="5">Seleccione un consecutivo para ver inconsistencias</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- ======================= RESET DE TABLAS ======================= -->
+                    <div class="reset-section">
+                        <h3>Resetear Tablas</h3>
+                        <p>Eliminar contenido de las tablas TOMA_FISICA y TOMA_FISICA_DET</p>
+                        <button class="reset-btn" onclick="resetearTablas()">Resetear Tablas</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div> 
+
+    <script>
+        // Cambia esta URL por la IP de tu backend
+        const API_BASE_URL = 'http://192.168.40.25:5000/api';
+
+        let currentUser = null;
+
+        window.addEventListener('load', function () {
+            const storedUser = localStorage.getItem('currentUser');
+            if (storedUser) {
+                currentUser = JSON.parse(storedUser);
+            } else {
+                window.location.href = 'login.html';
+            }
+
+            loadAdminDashboard();
+        });
+
+        // ProtecciÃ³n de acceso - debe ir al inicio del script
+        window.addEventListener('load', () => {
+            const userData = localStorage.getItem('currentUser');
+
+            if (!userData) {
+                // Si no hay usuario logueado, redirige al login
+                window.location.href = 'login.html';
+                return;
+            }
+
+            const user = JSON.parse(userData);
+
+            // ProtecciÃ³n por tipo de usuario
+            const currentPage = window.location.pathname.split('/').pop();
+
+            if (currentPage === 'admin.html' && user.role !== 'admin') {
+                alert('Acceso denegado. Solo administradores pueden ingresar aquÃ­.');
+                window.location.href = 'worker.html';
+                return;
+            }
+
+            if (currentPage === 'worker.html' && user.role !== 'worker') {
+                alert('Acceso denegado. Solo trabajadores pueden ingresar aquÃ­.');
+                window.location.href = 'admin.html';
+                return;
+            }
+        });
+
+
+        function logout() {
+            localStorage.removeItem('currentUser');
+            window.location.href = 'login.html';
+        }
+
+        async function loadAdminDashboard() {
+            try {
+                const consecutivosResponse = await fetch(`${API_BASE_URL}/consecutivos`);
+                const consecutivos = await consecutivosResponse.json();
+
+                const consecSelect = document.getElementById('adminConsecutivo');
+                consecSelect.innerHTML = '<option value="">Seleccione consecutivo</option>';
+
+                consecutivos.forEach(item => {
+                    const option = document.createElement('option');
+                    option.value = item.consec;
+                    option.textContent = item.consec;
+                    consecSelect.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error al cargar dashboard de admin:', error);
+                alert('Error al cargar datos');
+            }
+        }
+
+        async function loadTareasAsignadas() {
+            const consecutivo = document.getElementById('adminConsecutivo').value;
+
+            if (!consecutivo) {
+                document.getElementById('tareasTableBody').innerHTML = '<tr><td colspan="4">Seleccione un consecutivo para ver las localizaciones</td></tr>';
+                return;
+            }
+
+            try {
+                const workersResponse = await fetch(`${API_BASE_URL}/trabajadores`);
+                const workers = await workersResponse.json();
+
+                const response = await fetch(`${API_BASE_URL}/tareas-asignadas/${consecutivo}`);
+                const tareas = await response.json();
+
+                const tbody = document.getElementById('tareasTableBody');
+                tbody.innerHTML = '';
+
+                const tareasValidas = tareas.filter(t =>
+                    t.CodLocaliz && t.CodLocaliz.trim() !== '' &&
+                    t.DescBodega && t.DescBodega.trim() !== ''
+                );
+
+                if (tareasValidas.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4">No hay localizaciones vÃ¡lidas para este consecutivo</td></tr>';
+                    return;
+                }
+
+                tareasValidas.forEach(tarea => {
+                    const row = document.createElement('tr');
+
+                    // Bodega
+                    const bodegaCell = document.createElement('td');
+                    bodegaCell.textContent = tarea.DescBodega || 'Sin bodega';
+
+                    // LocalizaciÃ³n
+                    const localizCell = document.createElement('td');
+                    localizCell.textContent = tarea.CodLocaliz || 'Sin localizaciÃ³n';
+
+                    // Usuario (conteo)
+                    const asignarCell = document.createElement('td');
+                    const select = document.createElement('select');
+                    select.innerHTML = '<option value="">Sin asignar</option>';
+
+                    workers.forEach(worker => {
+                        const option = document.createElement('option');
+                        option.value = worker.CodUsuario;
+                        option.textContent = worker.NomUsuario;
+                        if (tarea.Usuario === worker.CodUsuario) option.selected = true;
+                        select.appendChild(option);
+                    });
+
+                    select.onchange = () => {
+                        updateAsignacion(consecutivo, tarea.CodLocaliz, select.value);
+                    };
+
+                    asignarCell.appendChild(select);
+
+                    // UsuarioReconteo (reconteo)
+                    const reconteoCell = document.createElement('td');
+                    const reconteoSelect = document.createElement('select');
+                    reconteoSelect.innerHTML = '<option value="">Sin asignar</option>';
+
+                    workers
+                        .filter(w => w.CodUsuario !== select.value) // excluir el usuario principal
+                        .forEach(worker => {
+                            const option = document.createElement('option');
+                            option.value = worker.CodUsuario;
+                            option.textContent = worker.NomUsuario;
+                            if (tarea.UsuarioReconteo === worker.CodUsuario) option.selected = true;
+                            reconteoSelect.appendChild(option);
+                        });
+
+                    reconteoSelect.onchange = () => {
+                        if (reconteoSelect.value === select.value) {
+                            alert('El usuario de reconteo no puede ser el mismo que el de conteo.');
+                            reconteoSelect.value = '';
+                            return;
+                        }
+                        updateAsignacionReconteo(consecutivo, tarea.CodLocaliz, reconteoSelect.value);
+                    };
+
+                    reconteoCell.appendChild(reconteoSelect);
+
+                    row.appendChild(bodegaCell);
+                    row.appendChild(localizCell);
+                    row.appendChild(asignarCell);
+                    row.appendChild(reconteoCell);
+                    tbody.appendChild(row);
+                });
+
+            } catch (error) {
+                console.error('Error al cargar tareas asignadas:', error);
+                alert('Error al cargar tareas asignadas');
+            }
+        }
+
+        async function updateAsignacion(consecutivo, localizacion, usuario) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/asignar-localizacion`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ consecutivo, localizacion, usuario })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    alert('AsignaciÃ³n actualizada correctamente');
+                    loadTareasAsignadas();
+                } else {
+                    alert('Error al actualizar asignaciÃ³n');
+                }
+            } catch (error) {
+                console.error('Error al actualizar asignaciÃ³n:', error);
+                alert('Error de conexiÃ³n con el servidor');
+            }
+        }
+
+        async function updateAsignacionReconteo(consecutivo, localizacion, usuarioReconteo) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/asignar-reconteo`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ consecutivo, localizacion, usuarioReconteo })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    alert('AsignaciÃ³n de reconteo actualizada correctamente');
+                    loadTareasAsignadas();
+                } else {
+                    alert('Error al actualizar asignaciÃ³n de reconteo');
+                }
+            } catch (error) {
+                console.error('Error al asignar reconteo:', error);
+                alert('Error de conexiÃ³n con el servidor');
+            }
+        }
+
+        async function resetearTablas() {
+            if (!confirm('Â¿EstÃ¡ seguro de que desea resetear las tablas? Esta acciÃ³n no se puede deshacer.')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/resetear-tablas`, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tablas: ['TOMA_FISICA', 'TOMA_FISICA_DET'] })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    alert('Tablas reseteadas correctamente');
+                } else {
+                    alert('Error al resetear tablas');
+                }
+            } catch (error) {
+                console.error('Error al resetear tablas:', error);
+                alert('Error de conexiÃ³n con el servidor');
+            }
+        }
+
+        // ================== TABLA DE INCONSISTENCIAS ==================
+        async function loadInconsistencias() {
+            const consecutivo = document.getElementById('adminConsecutivo').value;
+            if (!consecutivo) return;
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/inconsistencias/${consecutivo}`);
+                const inconsistencias = await response.json();
+
+                const tbody = document.getElementById('inconsistenciasTableBody');
+                tbody.innerHTML = '';
+
+                if (!inconsistencias || inconsistencias.length === 0) {
+                    const emptyRow = document.createElement('tr');
+                    emptyRow.innerHTML = `<td colspan="5" class="text-center text-gray-500">Sin inconsistencias</td>`;
+                    tbody.appendChild(emptyRow);
+                    return;
+                }
+
+                inconsistencias.forEach(item => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${item.DescBodega}</td>
+                        <td>${item.Localiz}</td>
+                        <td>${item.NomProd}</td>
+                        <td>${item.Existencia}</td>
+                        <td>${item.Conteo}</td>
+                    `;
+                    tbody.appendChild(row);
+                });
+            } catch (error) {
+                console.error('Error al cargar inconsistencias:', error);
+                const tbody = document.getElementById('inconsistenciasTableBody');
+                tbody.innerHTML = `<tr><td colspan="5" class="text-center text-red-500">Error al obtener inconsistencias</td></tr>`;
+            }
+        }
+
+        document.getElementById('adminConsecutivo').addEventListener('change', () => {
+            loadInconsistencias();
+        });
+    </script>
+</body>
+</html>

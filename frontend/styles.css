@@ -1,0 +1,575 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+body {
+    background: linear-gradient(135deg, #000000 0%, #1a1a1a 100%);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 10px;
+    color: #ffffff;
+}
+
+.barcode-scanner button {
+    padding: 8px 12px;      /* Más pequeño que el global */
+    font-size: 14px;        /* Texto más pequeño */
+    width: auto;            /* Quita el 100% heredado */
+    min-width: 80px;        /* Tamaño mínimo para no encoger demasiado */
+    flex-shrink: 0;         /* Evita que se achique si la pantalla es pequeña */
+}
+
+.container {
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.login-container, .admin-container, .worker-container {
+    background: #1e1e1e;
+    border-radius: 15px;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+    padding: 20px;
+    display: none;
+    border: 1px solid #333;
+    position: relative;
+}
+
+.active {
+    display: block;
+}
+
+
+.login-form, .admin-content, .worker-content {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    margin-top: 70px; /* Espacio para el logo */
+}
+
+.form-group {
+    margin-bottom: 15px;
+}
+
+label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: #ffffff;
+    font-size: 14px;
+}
+
+input, select {
+    width: 100%;
+    padding: 12px 16px;
+    border: 2px solid #333;
+    border-radius: 8px;
+    font-size: 16px;
+    transition: border-color 0.3s;
+    background: #2d2d2d;
+    color: #ffffff;
+}
+
+input:focus, select:focus {
+    outline: none;
+    border-color: #0056b3; /* Azul más oscuro */
+}
+
+button {
+    background: linear-gradient(135deg, #0056b3 0%, #003d80 100%); /* Azules más oscuros */
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 600;
+    transition: transform 0.2s;
+    width: 100%;
+}
+
+.tareas-detalle {
+    opacity: 0;
+    transform: translateY(-10px);
+    transition: all 0.3s ease;
+}
+
+.tareas-detalle.active {
+    display: block;
+    opacity: 1;
+    transform: translateY(0);
+}
+
+button:hover {
+    transform: translateY(-2px);
+    background: linear-gradient(135deg, #003d80 0%, #002952 100%); /* Azules aún más oscuros */
+}
+
+button:disabled {
+    background: #444;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.admin-sections {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.assignment-form {
+    background: #2d2d2d;
+    padding: 20px;
+    border-radius: 10px;
+}
+
+.worker-tasks {
+    background: #2d2d2d;
+    padding: 20px;
+    border-radius: 10px;
+}
+
+.task-item {
+    background: #333;
+    padding: 15px;
+    margin: 10px 0;
+    border-radius: 8px;
+    border-left: 4px solid #0056b3; /* Azul más oscuro */
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+.product-list {
+    margin-top: 20px;
+}
+
+.product-item {
+    background: #333;
+    padding: 15px;
+    margin: 10px 0;
+    border-radius: 8px;
+    border: 2px solid #444;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: all 0.3s;
+}
+
+.product-item.active {
+    border-color: #0056b3; /* Azul más oscuro */
+    background: #3a3a3a;
+}
+
+.product-item.inactive {
+    background: #2d2d2d;
+    opacity: 0.7;
+}
+
+.count-input {
+    display: none;
+    align-items: center;
+    gap: 10px;
+    margin-left: 10px;
+}
+
+.count-input.visible {
+    display: flex;
+}
+
+.count-input input {
+    width: 80px;
+    background: #2d2d2d;
+    color: #ffffff;
+    border: 1px solid #444;
+}
+
+.status-indicator {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    margin-right: 8px;
+}
+
+.status-pending {
+    background-color: #ff9800;
+}
+
+.status-completed {
+    background-color: #4caf50;
+}
+
+.header {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.header h1 {
+    color: #ffffff;
+    margin-bottom: 10px;
+    font-size: 1.8rem;
+}
+
+.header p {
+    color: #cccccc;
+    font-size: 14px;
+}
+
+.logout-btn {
+    background: #dc3545;
+    align-self: flex-start;
+    width: auto;
+    padding: 8px 16px;
+    font-size: 14px;
+    margin-top: 10px;
+}
+
+.logout-btn:hover {
+    background: #c82333;
+}
+
+.submit-btn {
+    background: #28a745;
+    font-size: 18px;
+    padding: 15px 30px;
+    margin-top: 20px;
+    width: 100%;
+}
+
+.submit-btn:hover {
+    background: #218838;
+}
+
+.submit-btn:disabled {
+    background: #6c757d;
+}
+
+.barcode-scanner {
+    display: flex;
+    gap: 10px;
+    margin: 15px 0;
+}
+
+.barcode-scanner input {
+    flex: 1;
+    background: #2d2d2d;
+    color: #ffffff;
+    border: 2px solid #0056b3; /* Azul más oscuro */
+}
+
+.task-header {
+    background: #0056b3; /* Azul más oscuro */
+    color: white;
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+}
+
+.task-header h3 {
+    margin: 0;
+    font-size: 1.2rem;
+}
+
+.task-info {
+    display: flex;
+    justify-content: space-around;
+    margin: 10px 0;
+    flex-wrap: wrap;
+}
+
+.task-info div {
+    background: rgba(255, 255, 255, 0.2);
+    padding: 8px 15px;
+    border-radius: 5px;
+    margin: 5px;
+    font-size: 14px;
+}
+
+.tarea-lista {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.tarea-item {
+    padding: 10px;
+    background: #e9ecef;
+    border-radius: 5px;
+    display: flex;
+    justify-content: space-between;
+}
+
+/* Estilos para dispositivos móviles */
+@media (max-width: 768px) {
+    .admin-sections {
+        flex-direction: column;
+    }
+    
+    .container {
+        padding: 5px;
+    }
+    
+    .login-container, .admin-container, .worker-container {
+        padding: 15px;
+    }
+    
+    .header h1 {
+        font-size: 1.5rem;
+    }
+    
+    .task-header h3 {
+        font-size: 1.1rem;
+    }
+    
+    .task-info div {
+        font-size: 12px;
+        padding: 6px 10px;
+    }
+    
+    .product-item {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .count-input {
+        width: 100%;
+        margin-top: 10px;
+        justify-content: center;
+    }
+    
+    .barcode-scanner {
+        flex-direction: column;
+    }
+    
+    .logo {
+        width: 50px;
+        height: 50px;
+        font-size: 20px;
+    }
+    
+    .login-form, .admin-content, .worker-content {
+        margin-top: 60px;
+    }
+}
+
+/* Tabla para asignación de tareas */
+.tareas-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 15px;
+}
+
+.tareas-table th, .tareas-table td {
+    border: 1px solid #444;
+    padding: 10px;
+    text-align: left;
+}
+
+.tareas-table th {
+    background-color: #2d2d2d;
+}
+
+.tareas-table select {
+    width: 100%;
+    background: #2d2d2d;
+    color: #ffffff;
+    border: 1px solid #444;
+}
+
+.reset-section {
+    background: #333;
+    padding: 15px;
+    border-radius: 8px;
+    margin-top: 20px;
+}
+
+.reset-btn {
+    background: #dc3545;
+    width: 100%;
+    margin-top: 10px;
+}
+
+.reset-btn:hover {
+    background: #c82333;
+}
+
+/* Mensaje de producto incorrecto */
+.producto-incorrecto {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.producto-incorrecto-content {
+    background: #1e1e1e;
+    padding: 20px;
+    border-radius: 10px;
+    max-width: 90%;
+    text-align: center;
+    border: 1px solid #333;
+}
+
+.producto-incorrecto-btn {
+    margin-top: 15px;
+    background: #6c757d;
+}
+
+/* Nuevos estilos para la vista de trabajador */
+.tareas-resumen {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: #0056b3; /* Azul más oscuro */
+    color: white;
+    padding: 15px;
+    border-radius: 10px;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+    z-index: 100;
+    cursor: pointer;
+    max-width: 300px;
+    border: 1px solid #003d80; /* Azul aún más oscuro */
+}
+
+.tareas-resumen:hover {
+    background: #003d80; /* Azul aún más oscuro */
+}
+
+.tareas-detalle {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: #1e1e1e;
+    color: #ffffff;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 5px 25px rgba(0,0,0,0.5);
+    z-index: 101;
+    max-width: 400px;
+    max-height: 80vh;
+    overflow-y: auto;
+    display: none;
+    border: 1px solid #333;
+}
+
+.tareas-detalle.active {
+    display: block;
+}
+
+.cerrar-tareas {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: #dc3545;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    cursor: pointer;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.tarea-seleccionable {
+    background: #2d2d2d;
+    padding: 15px;
+    margin: 10px 0;
+    border-radius: 8px;
+    border: 2px solid #444;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.tarea-seleccionable:hover {
+    border-color: #0056b3; /* Azul más oscuro */
+    background: #333;
+}
+
+.tarea-seleccionable.seleccionada {
+    border-color: #28a745;
+    background: #2d4430;
+}
+
+.escanear-rapido {
+    display: flex;
+    gap: 10px;
+    margin: 15px 0;
+}
+
+.escanear-rapido input {
+    flex: 1;
+    padding: 10px;
+    border: 2px solid #0056b3; /* Azul más oscuro */
+    border-radius: 5px;
+    background: #2d2d2d;
+    color: #ffffff;
+}
+
+.escanear-rapido button {
+    padding: 10px 15px;
+    width: auto;
+    background: #0056b3; /* Azul más oscuro */
+}
+
+.escanear-rapido button:hover {
+    background: #003d80; /* Azul aún más oscuro */
+}
+
+.producto-contador {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.contador-botones {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.contador-botones button {
+    padding: 5px 10px;
+    width: auto;
+    font-size: 14px;
+    background: #0056b3; /* Azul más oscuro */
+}
+
+.contador-botones button:hover {
+    background: #003d80; /* Azul aún más oscuro */
+}
+
+.contador-input {
+    width: 60px;
+    text-align: center;
+    background: #2d2d2d;
+    color: #ffffff;
+    border: 1px solid #444;
+}
+
+.mensaje-bienvenida {
+    text-align: center;
+    padding: 50px 20px;
+    font-size: 18px;
+    color: #ffffff;
+}
+
+.mensaje-bienvenida strong {
+    color: #0056b3; /* Azul más oscuro */
+}
+
+.tarea-seleccionable.reconteo {
+    background-color: #f4f4f4;
+    border-left: 4px solid #d98e04;
+}
